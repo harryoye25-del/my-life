@@ -1,4 +1,66 @@
-import { useState, useEffect, useReducer, useMemo, useCallback } from “react”;
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1117">
+<title>Life App</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; overflow-x: hidden; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script>
+// Suppress Babel in-browser warning
+const origWarn = console.warn;
+console.warn = function(...args) {
+  if (args[0] && typeof args[0] === 'string' && args[0].includes('in-browser Babel')) return;
+  origWarn.apply(console, args);
+};
+</script>
+<script type="text/babel" data-presets="react">
+
+// Polyfill window.storage API using localStorage
+window.storage = {
+async get(key) {
+try {
+const val = localStorage.getItem(key);
+if (val === null) throw new Error(“Key not found”);
+return { key, value: val };
+} catch(e) { throw e; }
+},
+async set(key, value) {
+try {
+localStorage.setItem(key, value);
+return { key, value };
+} catch(e) { return null; }
+},
+async delete(key) {
+localStorage.removeItem(key);
+return { key, deleted: true };
+},
+async list(prefix) {
+const keys = [];
+for (let i = 0; i < localStorage.length; i++) {
+const k = localStorage.key(i);
+if (!prefix || k.startsWith(prefix)) keys.push(k);
+}
+return { keys };
+}
+};
+
+const { useState, useEffect, useReducer, useMemo, useCallback } = React;
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const today = () => new Date().toISOString().split(“T”)[0];
@@ -2026,7 +2088,7 @@ return (<div>
 {/* Security Note */}
 <Card style={{ marginTop: 20, padding: "16px", borderLeft: "3px solid #4ade80" }}>
   <div style={{ fontSize: 13, fontWeight: 700, color: "#4ade80", marginBottom: 4 }}>🔐 Security Notice</div>
-  <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>All data encrypted with AES-256-GCM + HMAC-SHA256 integrity verification. PBKDF2-SHA512 with 600,000 iterations for key derivation. Auto-locks after 10 minutes of inactivity. Exports are encrypted (require your passphrase to restore). Printed reports are generated locally — never sent to any server. Use "Save as PDF" in print dialog for local copies.</div>
+  <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>Your data is stored locally in your browser using localStorage. Printed reports are generated locally — never sent to any server. Use "Save as PDF" in print dialog for local copies. Export your data regularly as backup.</div>
 </Card>
 ```
 
@@ -2057,173 +2119,48 @@ const navTabs=[
 {key:“vault”,label:“Vault”,icon:LockIcon,color:”#a78bfa”},
 ];
 
-export default function LifeApp(){
+function LifeApp(){
 const[state,dispatch]=useReducer(reducer,defaultState);
 const[activeTab,setActiveTab]=useState(“dashboard”);
 const[sideOpen,setSideOpen]=useState(true);
 const[loaded,setLoaded]=useState(false);
 const[searchQuery,setSearchQuery]=useState(””);
 const[searchOpen,setSearchOpen]=useState(false);
-// Security
-const[locked,setLocked]=useState(true);
-const[passphrase,setPassphrase]=useState(””);
-const[passInput,setPassInput]=useState(””);
-const[passError,setPassError]=useState(””);
-const[isNewUser,setIsNewUser]=useState(false);
-const[confirmPass,setConfirmPass]=useState(””);
+// Storage (no encryption for now)
 const[saving,setSaving]=useState(false);
-const[failCount,setFailCount]=useState(0);
-const[lockoutUntil,setLockoutUntil]=useState(0);
-const[passStrength,setPassStrength]=useState({ok:false,msg:””,strength:0,color:”#64748b”});
-const[lastActivity,setLastActivity]=useState(Date.now());
-const AUTO_LOCK_MS = 10 * 60 * 1000; // 10 minutes
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_MS = 60 * 1000; // 60 seconds
 
-// Auto-lock on inactivity
-useEffect(()=>{
-if(locked) return;
-const handler=()=>setLastActivity(Date.now());
-window.addEventListener(“click”,handler);
-window.addEventListener(“keydown”,handler);
-window.addEventListener(“scroll”,handler,true);
-const timer=setInterval(()=>{
-if(Date.now()-lastActivity > AUTO_LOCK_MS && !locked){
-setLocked(true);setPassphrase(””);setPassInput(””);
-}
-},15000);
-return()=>{clearInterval(timer);window.removeEventListener(“click”,handler);window.removeEventListener(“keydown”,handler);window.removeEventListener(“scroll”,handler,true);};
-},[locked,lastActivity]);
-
-// Check if user has existing encrypted data
+// Load data from localStorage
 useEffect(()=>{(async()=>{
 try{
-const verifier=await window.storage.get(“life-app-v5-verify”);
-const encData=await window.storage.get(“life-app-v5-enc”);
-if(verifier?.value && encData?.value){ setIsNewUser(false); }
-else { setIsNewUser(true); }
-setLocked(true);
-}catch(e){setIsNewUser(true);setLocked(true);}
+const r=await window.storage.get(“life-app-data”);
+if(r?.value) dispatch({type:“LOAD”,data:JSON.parse(r.value)});
+}catch(e){}
+setLoaded(true);
 })();},[]);
 
-// Unlock with passphrase
-const handleUnlock = async () => {
-// Brute-force check
-if(Date.now() < lockoutUntil){
-const secs = Math.ceil((lockoutUntil-Date.now())/1000);
-setPassError(`Too many attempts. Locked for ${secs}s.`);
-return;
-}
-if(isNewUser){
-const strength=checkPassphraseStrength(passInput);
-if(!strength.ok){setPassError(strength.msg||“Passphrase too weak. Use 8+ chars with mixed case/numbers.”);return;}
-if(passInput!==confirmPass){setPassError(“Passphrases don’t match”);return;}
-setPassphrase(passInput);setLocked(false);setLoaded(true);setPassError(””);setFailCount(0);setLastActivity(Date.now());
-try{
-const enc=await encryptData(JSON.stringify(defaultState),passInput);
-await window.storage.set(“life-app-v5-enc”,enc);
-const verify=await encryptData(“LIFE-APP-V5-VERIFIED-OK”,passInput);
-await window.storage.set(“life-app-v5-verify”,verify);
-}catch(e){console.error(“Initial save failed:”,e);}
-} else {
-try{
-const verifier=await window.storage.get(“life-app-v5-verify”);
-if(verifier?.value){
-const testDecrypt=await decryptData(verifier.value,passInput);
-if(testDecrypt!==“LIFE-APP-V5-VERIFIED-OK”) throw new Error(“Bad passphrase”);
-}
-const r=await window.storage.get(“life-app-v5-enc”);
-if(r?.value){
-const decrypted=await decryptData(r.value,passInput);
-const data=JSON.parse(decrypted);
-dispatch({type:“LOAD”,data});
-}
-setPassphrase(passInput);setLocked(false);setLoaded(true);setPassError(””);setFailCount(0);setLastActivity(Date.now());
-}catch(e){
-const newFails=failCount+1;
-setFailCount(newFails);
-if(newFails>=MAX_ATTEMPTS){
-setLockoutUntil(Date.now()+LOCKOUT_MS);
-setPassError(`Wrong passphrase. Locked for 60 seconds (${newFails} failed attempts).`);
-} else {
-setPassError(`Wrong passphrase. ${MAX_ATTEMPTS-newFails} attempts remaining.`);
-}
-}
-}
-};
-
-// Auto-save encrypted (debounced)
+// Auto-save to localStorage
 useEffect(()=>{
-if(!loaded||!passphrase) return;
+if(!loaded) return;
 const timer=setTimeout(async()=>{
 setSaving(true);
-try{
-const enc=await encryptData(JSON.stringify(state),passphrase);
-await window.storage.set(“life-app-v5-enc”,enc);
-const verify=await encryptData(“LIFE-APP-V5-VERIFIED-OK”,passphrase);
-await window.storage.set(“life-app-v5-verify”,verify);
-}catch(e){console.error(“Encrypt save failed:”,e);}
+try{ await window.storage.set(“life-app-data”,JSON.stringify(state)); }catch(e){}
 setSaving(false);
-},800);
+},500);
 return ()=>clearTimeout(timer);
-},[state,loaded,passphrase]);
+},[state,loaded]);
 
 const searchResults=useMemo(()=>globalSearch(state,searchQuery),[state,searchQuery]);
 
-// Secure export — encrypted backup file
-const exportData=async()=>{
-try{
-const enc=await encryptData(JSON.stringify(state,null,2),passphrase);
-const backup={format:“life-app-encrypted-backup-v5”,created:new Date().toISOString(),data:enc};
-const blob=new Blob([JSON.stringify(backup)],{type:“application/json”});
-const url=URL.createObjectURL(blob);const a=document.createElement(“a”);a.href=url;a.download=`life-app-encrypted-${today()}.json`;a.click();URL.revokeObjectURL(url);
-}catch(e){console.error(“Export failed:”,e);}
+// Export data
+const exportData=()=>{
+const blob=new Blob([JSON.stringify(state,null,2)],{type:“application/json”});
+const url=URL.createObjectURL(blob);const a=document.createElement(“a”);a.href=url;a.download=`life-app-backup-${today()}.json`;a.click();URL.revokeObjectURL(url);
 };
-
-// Lock button
-const handleLock=()=>{setLocked(true);setPassphrase(””);setPassInput(””);setSearchOpen(false);setSearchQuery(””);};
 
 const renderTab=()=>{const p={state,dispatch,setActiveTab};const map={dashboard:DashboardTab,lifePlan:LifePlanTab,journal:JournalTab,diet:DietTab,grocery:GroceryTab,insurance:InsuranceTab,finance:FinanceTab,savings:SavingsTab,travel:TravelTab,family:FamilyTab,fouji:FoujiTab,car:CarTab,home:HomeTab,calendar:CalendarTab,inventory:InventoryTab,tasks:TasksTab,taxes:TaxReceiptsTab,health:HealthTab,emergency:EmergencyTab,vault:VaultTab,printSave:PrintSaveTab};const Comp=map[activeTab];return Comp?<Comp {…p}/>:null;};
 const activeNav=navTabs.find(t=>t.key===activeTab);
 // Get the tab key for printing (skip dashboard, calendar, printSave)
 const printableTab = activeTab && ![“dashboard”,“calendar”,“printSave”].includes(activeTab) ? activeTab : null;
-
-// 🔒 LOCK SCREEN
-if(locked){
-return(
-<div style={{fontFamily:”‘Outfit’,sans-serif”,background:”#0f1117”,color:”#f1f5f9”,minHeight:“100vh”,display:“flex”,alignItems:“center”,justifyContent:“center”,position:“relative”,overflow:“hidden”}}>
-<style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Libre+Baskerville:wght@400;700&display=swap');*{box-sizing:border-box;}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:0.8}}`}</style>
-<div style={{position:“fixed”,inset:0,pointerEvents:“none”}}>
-<div style={{position:“absolute”,top:“20%”,left:“20%”,width:300,height:300,borderRadius:“50%”,background:“radial-gradient(circle, rgba(56,189,248,0.06) 0%, transparent 70%)”,filter:“blur(60px)”,animation:“pulse 4s infinite”}}/>
-<div style={{position:“absolute”,bottom:“20%”,right:“20%”,width:350,height:350,borderRadius:“50%”,background:“radial-gradient(circle, rgba(168,139,250,0.05) 0%, transparent 70%)”,filter:“blur(60px)”,animation:“pulse 5s infinite 1s”}}/>
-</div>
-<div style={{textAlign:“center”,zIndex:1,maxWidth:380,width:“100%”,padding:“0 20px”}}>
-<div style={{width:72,height:72,borderRadius:20,background:“linear-gradient(135deg, #0ea5e9, #38bdf8)”,display:“flex”,alignItems:“center”,justifyContent:“center”,margin:“0 auto 24px”,boxShadow:“0 8px 32px rgba(56,189,248,0.3)”,animation:“float 3s ease-in-out infinite”}}>
-<LockIcon size={32} color="#0c1220"/>
-</div>
-<div style={{fontSize:28,fontWeight:800,fontFamily:”‘Libre Baskerville’,serif”,marginBottom:6}}>Life App</div>
-<div style={{fontSize:13,color:”#64748b”,marginBottom:32}}>{isNewUser?“Create a secure passphrase to encrypt your data”:“Enter your passphrase to unlock”}</div>
-
-```
-      <div style={{marginBottom:14}}>
-        <input type="password" value={passInput} onChange={e=>{setPassInput(e.target.value);setPassError("");if(isNewUser)setPassStrength(checkPassphraseStrength(e.target.value));}} onKeyDown={e=>{if(e.key==="Enter"&&(!isNewUser||confirmPass))handleUnlock();}} placeholder={isNewUser?"Create passphrase (min 8 chars)":"Enter passphrase"} autoFocus style={{width:"100%",padding:"14px 18px",background:"rgba(255,255,255,0.04)",border:"1.5px solid rgba(255,255,255,0.1)",borderRadius:14,color:"#f1f5f9",fontSize:16,fontFamily:"'Outfit',sans-serif",outline:"none",textAlign:"center",letterSpacing:1}}/>
-        {isNewUser&&passInput.length>0&&<div style={{marginTop:8}}>
-          <div style={{display:"flex",gap:3,marginBottom:4}}>{[1,2,3,4,5].map(i=>(<div key={i} style={{flex:1,height:4,borderRadius:2,background:i<=passStrength.strength?passStrength.color:"rgba(255,255,255,0.08)",transition:"all 0.3s"}}/>))}</div>
-          <div style={{fontSize:11,color:passStrength.color,fontWeight:600,textAlign:"center"}}>{passStrength.msg}</div>
-        </div>}
-      </div>
-      {isNewUser&&<div style={{marginBottom:14}}>
-        <input type="password" value={confirmPass} onChange={e=>{setConfirmPass(e.target.value);setPassError("");}} onKeyDown={e=>{if(e.key==="Enter")handleUnlock();}} placeholder="Confirm passphrase" style={{width:"100%",padding:"14px 18px",background:"rgba(255,255,255,0.04)",border:"1.5px solid rgba(255,255,255,0.1)",borderRadius:14,color:"#f1f5f9",fontSize:16,fontFamily:"'Outfit',sans-serif",outline:"none",textAlign:"center",letterSpacing:1}}/>
-      </div>}
-      {passError&&<div style={{color:"#f43f5e",fontSize:13,marginBottom:12,fontWeight:600}}>{passError}</div>}
-      <button onClick={handleUnlock} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:"linear-gradient(135deg, #0ea5e9, #38bdf8)",color:"#0c1220",fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:"'Outfit',sans-serif",boxShadow:"0 4px 20px rgba(56,189,248,0.3)",transition:"all 0.2s"}}>{isNewUser?"Create & Enter":"Unlock"}</button>
-      <div style={{marginTop:24,fontSize:11,color:"#334155",lineHeight:1.6}}>🔐 AES-256-GCM + HMAC-SHA256 integrity<br/>PBKDF2-SHA512 600K iterations • Auto-lock 10min<br/>Brute-force protection • Encrypted exports only</div>
-    </div>
-  </div>
-);
-```
-
-}
 
 return(
 <div style={{fontFamily:“var(–font-body)”,background:”#0f1117”,color:”#f1f5f9”,minHeight:“100vh”,display:“flex”,position:“relative”,overflow:“hidden”}}>
@@ -2246,9 +2183,8 @@ return(
 </button>
 );})}
 </nav>
-<div style={{padding:“10px 12px”,borderTop:“1px solid rgba(255,255,255,0.06)”,display:“flex”,gap:6}}>
-<button onClick={exportData} style={{flex:1,display:“flex”,alignItems:“center”,justifyContent:“center”,gap:5,padding:“8px”,borderRadius:8,border:“1px solid rgba(255,255,255,0.08)”,background:“transparent”,color:”#64748b”,fontSize:11,fontWeight:600,cursor:“pointer”,fontFamily:“var(–font-body)”}}><DownloadIcon size={13} color="#64748b"/> Export</button>
-<button onClick={handleLock} style={{flex:1,display:“flex”,alignItems:“center”,justifyContent:“center”,gap:5,padding:“8px”,borderRadius:8,border:“1px solid rgba(244,63,94,0.2)”,background:“rgba(244,63,94,0.06)”,color:”#fb7185”,fontSize:11,fontWeight:600,cursor:“pointer”,fontFamily:“var(–font-body)”}}><LockIcon size={13} color="#fb7185"/> Lock</button>
+<div style={{padding:“10px 12px”,borderTop:“1px solid rgba(255,255,255,0.06)”}}>
+<button onClick={exportData} style={{width:“100%”,display:“flex”,alignItems:“center”,justifyContent:“center”,gap:6,padding:“8px”,borderRadius:8,border:“1px solid rgba(255,255,255,0.08)”,background:“transparent”,color:”#64748b”,fontSize:12,fontWeight:600,cursor:“pointer”,fontFamily:“var(–font-body)”}}><DownloadIcon size={14} color="#64748b"/> Export Data</button>
 </div>
 <div style={{padding:“8px 12px 12px”,fontSize:9,color:”#334155”,textAlign:“center”}}>Auto-saved ✓</div>
 </div>
@@ -2258,7 +2194,7 @@ return(
 <button onClick={()=>setSideOpen(!sideOpen)} style={{background:“none”,border:“none”,color:”#64748b”,cursor:“pointer”,padding:4,borderRadius:8}}>{sideOpen?<XIcon size={18} color="#64748b"/>:<MenuIcon size={18} color="#64748b"/>}</button>
 <div style={{width:8,height:8,borderRadius:“50%”,background:activeNav?.color||”#38bdf8”}}/>
 <span style={{fontSize:15,fontWeight:700,color:”#f1f5f9”,fontFamily:“var(–font-display)”,flex:1}}>{activeNav?.label}</span>
-{saving&&<span style={{fontSize:10,color:”#4ade80”,fontWeight:600,display:“flex”,alignItems:“center”,gap:4}}>🔐 Saving…</span>}
+{saving&&<span style={{fontSize:10,color:”#4ade80”,fontWeight:600,display:“flex”,alignItems:“center”,gap:4}}>💾 Saving…</span>}
 {printableTab&&<PrintTabButton tabKey={printableTab} tabLabel={activeNav?.label||””} state={state}/>}
 <div style={{position:“relative”}}>
 <button onClick={()=>setSearchOpen(!searchOpen)} style={{background:searchOpen?“rgba(56,189,248,0.1)”:“none”,border:“none”,color:”#64748b”,cursor:“pointer”,padding:6,borderRadius:8}}><SearchIcon size={18} color="#64748b"/></button>
@@ -2279,3 +2215,11 @@ searchResults.map((r,i)=>(<button key={i} onClick={()=>{setActiveTab(r.tab);setS
 </div>
 );
 }
+
+// Mount the app
+const root = ReactDOM.createRoot(document.getElementById(“root”));
+root.render(React.createElement(LifeApp));
+</script>
+
+</body>
+</html>
